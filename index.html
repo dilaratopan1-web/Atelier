@@ -437,11 +437,17 @@ nav.tabs::-webkit-scrollbar{display:none;}
 #modalOverlay .modal-card{border-radius:16px;border-top:none;}
 
 .meal-input-wrap{position:relative;}
+.meal-input-row{display:flex;gap:8px;}
 #mealDayInput{
-  width:100%;border:1px solid var(--border);border-radius:9px;padding:10px 12px;
+  flex:1;border:1px solid var(--border);border-radius:9px;padding:10px 12px;
   font-family:'Inter',sans-serif;font-size:14.5px;background:var(--paper);color:var(--ink);
 }
 #mealDayInput:focus{outline:2px solid var(--ink);outline-offset:1px;}
+#mealDayAddBtn{
+  font-family:'Inter',sans-serif;font-size:13px;font-weight:600;
+  background:var(--ink);color:var(--paper);border:none;border-radius:9px;
+  padding:0 16px;cursor:pointer;flex-shrink:0;
+}
 .meal-suggestions{
   position:absolute;left:0;right:0;top:calc(100% + 4px);
   background:var(--card);border:1px solid var(--border);border-radius:9px;
@@ -584,8 +590,12 @@ nav.tabs::-webkit-scrollbar{display:none;}
 <div class="modal-overlay hidden" id="mealDayModalOverlay">
   <div class="modal-card">
     <p class="modal-title" id="mealDayModalTitle">Meal · Salı</p>
+    <p class="modal-hint">Tariflerinden birini yazınca öneri çıkar; tariflerde olmayan bir yemeği de yazıp Ekle'ye basarak eklersin.</p>
     <div class="meal-input-wrap">
-      <input type="text" id="mealDayInput" placeholder="Yemek adı yaz…" autocomplete="off" />
+      <div class="meal-input-row">
+        <input type="text" id="mealDayInput" placeholder="Yemek adı yaz…" autocomplete="off" />
+        <button id="mealDayAddBtn">Ekle</button>
+      </div>
       <div class="meal-suggestions hidden" id="mealDaySuggestions"></div>
     </div>
     <div class="meal-day-items" id="mealDayItems"></div>
@@ -1367,7 +1377,14 @@ async function saveRecipeModal(){
   if(!recipeCtx) return;
   const ingredients = document.getElementById('recipeIngredients').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const steps = document.getElementById('recipeSteps').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  await saveRecipe(recipeCtx, {ingredients, steps, image: recipeImageData});
+  const hasContent = ingredients.length>0 || steps.length>0 || !!recipeImageData;
+  if(hasContent){
+    await saveRecipe(recipeCtx, {ingredients, steps, image: recipeImageData});
+  } else {
+    // don't leave an empty shell in the recipe catalog for a plain meal note
+    try{ await window.storage.delete('recipe:'+slugifyDish(recipeCtx), false); }catch(e){}
+    showToast('Malzeme/adım girmediğin için tarif olarak kaydedilmedi.');
+  }
   closeRecipeModal();
   if(currentView==='recipes') await showRecipes();
 }
@@ -2568,6 +2585,9 @@ document.getElementById('modalImageRemove').addEventListener('click', (e)=>{
 document.getElementById('mealDayInput').addEventListener('input', updateMealSuggestions);
 document.getElementById('mealDayInput').addEventListener('keydown', (e)=>{
   if(e.key==='Enter'){ e.preventDefault(); addDishToDay(document.getElementById('mealDayInput').value); }
+});
+document.getElementById('mealDayAddBtn').addEventListener('click', ()=>{
+  addDishToDay(document.getElementById('mealDayInput').value);
 });
 document.getElementById('mealDayDone').addEventListener('click', closeMealDayModal);
 document.getElementById('mealDayModalOverlay').addEventListener('click', (e)=>{
