@@ -685,7 +685,13 @@ function getMonday(d){
   return m;
 }
 function addDays(d,n){ const r=new Date(d); r.setDate(d.getDate()+n); return r; }
-function fmtISO(d){ return d.toISOString().slice(0,10); }
+function fmtISO(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+day;
+}
+function legacyFmtISO(d){ return d.toISOString().slice(0,10); }
 function fmtShort(d){ return d.toLocaleDateString('tr-TR',{day:'numeric',month:'short'}); }
 function weekDates(monday){ return DAY_KEYS.map((k,i)=>addDays(monday,i)); }
 function capitalize(s){ return s ? s.charAt(0).toLocaleUpperCase('tr-TR')+s.slice(1) : s; }
@@ -812,6 +818,20 @@ async function loadWeek(monday){
   try{
     const r = await window.storage.get(storageKey(monday));
     if(r && r.value) return mergeWithBlank(JSON.parse(r.value));
+  }catch(e){}
+  // Migration safety net: an earlier version computed week-keys using UTC,
+  // which shifts dates back a day for timezones ahead of UTC (e.g. Turkey).
+  // If nothing is found under the correct key, check the old shifted key.
+  try{
+    const legacyKey = 'panel-week:'+legacyFmtISO(monday);
+    if(legacyKey !== storageKey(monday)){
+      const r2 = await window.storage.get(legacyKey);
+      if(r2 && r2.value){
+        const migrated = mergeWithBlank(JSON.parse(r2.value));
+        saveWeek(monday, migrated);
+        return migrated;
+      }
+    }
   }catch(e){}
   return blankWeek();
 }
