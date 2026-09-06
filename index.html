@@ -148,6 +148,17 @@ h1{
   font-family:'Fraunces',serif;font-style:italic;font-size:13px;color:var(--ink-soft);
   background:none;border:none;text-decoration:underline;cursor:pointer;padding:0 0 12px;display:block;
 }
+.copy-link{
+  font-family:'Inter',sans-serif;font-size:12px;color:var(--ink-soft);
+  background:none;border:none;text-decoration:underline;cursor:pointer;padding:10px 0 0;display:block;
+}
+.copy-day-list{padding:6px 0 4px;display:flex;flex-direction:column;gap:2px;}
+.copy-day-row{display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer;}
+.copy-day-row .item-check{flex-shrink:0;}
+.copy-warning{
+  font-size:12px;color:#A65068;background:rgba(166,80,104,0.09);
+  border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.5;
+}
 .week-nav{display:flex;align-items:center;gap:10px;}
 .week-btn{
   width:40px;height:40px;border-radius:9px;border:1px solid var(--border);
@@ -615,6 +626,35 @@ nav.tabs::-webkit-scrollbar{display:none;}
     <div class="modal-actions">
       <button id="routineStepsCancel">Vazgeç</button>
       <button id="routineStepsSave">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="weekCopyModalOverlay">
+  <div class="modal-card">
+    <p class="modal-title">Haftayı Kopyala</p>
+    <p class="modal-hint">Bu haftadaki tüm kategoriler seçtiğin haftaya aynen kopyalanacak.</p>
+    <div class="week-nav">
+      <button class="week-btn" id="weekCopyPrev"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <span class="week-label" id="weekCopyTargetLabel"></span>
+      <button class="week-btn" id="weekCopyNext"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
+    </div>
+    <div id="weekCopyWarning"></div>
+    <div class="modal-actions">
+      <button id="weekCopyCancel">Vazgeç</button>
+      <button id="weekCopyConfirm">Kopyala</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="dayCopyModalOverlay">
+  <div class="modal-card">
+    <p class="modal-title" id="dayCopyTitle">Günü Kopyala</p>
+    <p class="modal-hint">Bu gündeki tüm kategoriler işaretlediğin günlere aynen kopyalanacak (bu haftanın içinde).</p>
+    <div class="copy-day-list" id="dayCopyList"></div>
+    <div class="modal-actions">
+      <button id="dayCopyCancel">Vazgeç</button>
+      <button id="dayCopyConfirm">Kopyala</button>
     </div>
   </div>
 </div>
@@ -1297,6 +1337,100 @@ function refreshCurrentView(){
   else if(currentView==='day') renderDayScreen();
 }
 
+/* ---------- WEEK COPY ---------- */
+let weekCopyTargetMonday = null;
+function openWeekCopyModal(){
+  weekCopyTargetMonday = addDays(currentMonday, 7);
+  renderWeekCopyTarget();
+  document.getElementById('weekCopyModalOverlay').classList.remove('hidden');
+}
+function closeWeekCopyModal(){
+  document.getElementById('weekCopyModalOverlay').classList.add('hidden');
+}
+async function renderWeekCopyTarget(){
+  const dates = weekDates(weekCopyTargetMonday);
+  document.getElementById('weekCopyTargetLabel').textContent = fmtShort(dates[0])+' – '+fmtShort(dates[6]);
+  const warnEl = document.getElementById('weekCopyWarning');
+  warnEl.innerHTML = '';
+  const targetData = await loadWeek(weekCopyTargetMonday);
+  const hasContent = LANES.some(l=>laneHasContent(l, targetData));
+  if(hasContent){
+    warnEl.innerHTML = `<div class="copy-warning">Bu haftada zaten veri var — kopyalarsan üzerine yazılır.</div>`;
+  }
+}
+async function confirmWeekCopy(){
+  const clone = JSON.parse(JSON.stringify(weekData));
+  await saveWeek(weekCopyTargetMonday, clone);
+  closeWeekCopyModal();
+  showToast('Hafta kopyalandı.');
+}
+
+/* ---------- DAY COPY ---------- */
+function getDaySnapshot(data, dayKey){
+  return {
+    bakim: JSON.parse(JSON.stringify(data.bakim[dayKey]||[])),
+    mealprep: JSON.parse(JSON.stringify(data.mealprep[dayKey]||[])),
+    hobiler: JSON.parse(JSON.stringify(data.hobiler[dayKey]||[])),
+    saglik: JSON.parse(JSON.stringify(data.saglik[dayKey]||[])),
+    ev: JSON.parse(JSON.stringify(data.ev[dayKey]||[])),
+    sosyal: JSON.parse(JSON.stringify(data.sosyal[dayKey]||[])),
+    diger: JSON.parse(JSON.stringify(data.diger[dayKey]||[])),
+    sporMindful: JSON.parse(JSON.stringify(data.sporMindful[dayKey]||{sport:[],mindful:[]})),
+    dayImage: (data.dayImages && data.dayImages.diger) ? data.dayImages.diger[dayKey] : null,
+    eveningNote: data.eveningNotes ? (data.eveningNotes[dayKey]||'') : ''
+  };
+}
+function applyDaySnapshot(data, dayKey, snap){
+  data.bakim[dayKey] = JSON.parse(JSON.stringify(snap.bakim));
+  data.mealprep[dayKey] = JSON.parse(JSON.stringify(snap.mealprep));
+  data.hobiler[dayKey] = JSON.parse(JSON.stringify(snap.hobiler));
+  data.saglik[dayKey] = JSON.parse(JSON.stringify(snap.saglik));
+  data.ev[dayKey] = JSON.parse(JSON.stringify(snap.ev));
+  data.sosyal[dayKey] = JSON.parse(JSON.stringify(snap.sosyal));
+  data.diger[dayKey] = JSON.parse(JSON.stringify(snap.diger));
+  data.sporMindful[dayKey] = JSON.parse(JSON.stringify(snap.sporMindful));
+  if(!data.dayImages) data.dayImages = {diger:{mon:null,tue:null,wed:null,thu:null,fri:null,sat:null,sun:null}};
+  if(!data.dayImages.diger) data.dayImages.diger = {mon:null,tue:null,wed:null,thu:null,fri:null,sat:null,sun:null};
+  data.dayImages.diger[dayKey] = snap.dayImage;
+  if(!data.eveningNotes) data.eveningNotes = {mon:'',tue:'',wed:'',thu:'',fri:'',sat:'',sun:''};
+  data.eveningNotes[dayKey] = snap.eveningNote || '';
+}
+function openDayCopyModal(){
+  const sourceKey = currentDayKey;
+  document.getElementById('dayCopyTitle').textContent = DAY_NAMES[sourceKey]+' Günü Kopyala';
+  const list = document.getElementById('dayCopyList');
+  list.innerHTML = DAY_KEYS.filter(k=>k!==sourceKey).map(k=>`
+    <div class="copy-day-row" data-day="${k}">
+      <span class="item-check" data-action="toggle"></span>
+      <span>${DAY_NAMES[k]}</span>
+    </div>`).join('');
+  list.querySelectorAll('.copy-day-row').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const check = row.querySelector('.item-check');
+      const nowDone = !check.classList.contains('done');
+      check.classList.toggle('done', nowDone);
+      check.innerHTML = nowDone ? checkIcon() : '';
+    });
+  });
+  document.getElementById('dayCopyModalOverlay').classList.remove('hidden');
+}
+function closeDayCopyModal(){
+  document.getElementById('dayCopyModalOverlay').classList.add('hidden');
+}
+async function confirmDayCopy(){
+  const sourceKey = currentDayKey;
+  const snapshot = getDaySnapshot(weekData, sourceKey);
+  const targets = [...document.querySelectorAll('.copy-day-row')]
+    .filter(row=>row.querySelector('.item-check').classList.contains('done'))
+    .map(row=>row.dataset.day);
+  if(!targets.length){ closeDayCopyModal(); return; }
+  targets.forEach(k=> applyDaySnapshot(weekData, k, snapshot));
+  await saveWeek(currentMonday, weekData);
+  closeDayCopyModal();
+  refreshCurrentView();
+  showToast(targets.length+' güne kopyalandı.');
+}
+
 /* ---------- ROUTINE STEPS MODAL ---------- */
 let routineStepsCtx = null;
 function openRoutineStepsModal(routineKey){
@@ -1760,10 +1894,12 @@ function renderDayScreen(){
       <button class="week-btn" id="prevDay"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></button>
       <span class="week-label">${fmtShort(currentDates[dayIdx])}</span>
       <button class="week-btn" id="nextDay"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
-    </div>`;
+    </div>
+    <button class="copy-link" id="openDayCopy">📋 Bu günü başka günlere kopyala</button>`;
   document.getElementById('backToWeekFromDay').addEventListener('click', ()=> showWeek(currentMonday));
   document.getElementById('prevDay').addEventListener('click', ()=> showDayView(addDays(currentDayDate,-1)));
   document.getElementById('nextDay').addEventListener('click', ()=> showDayView(addDays(currentDayDate,1)));
+  document.getElementById('openDayCopy').addEventListener('click', openDayCopyModal);
 
   const body = document.getElementById('screenBody');
   const filledCount = LANES.filter(l=>{
@@ -1865,10 +2001,12 @@ async function renderWeekScreen(){
       <button class="week-btn" id="prevWeek"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></button>
       <span class="week-label">${fmtShort(currentDates[0])} – ${fmtShort(currentDates[6])}</span>
       <button class="week-btn" id="nextWeek"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
-    </div>`;
+    </div>
+    <button class="copy-link" id="openWeekCopy">📋 Bu haftayı başka bir haftaya kopyala</button>`;
   document.getElementById('backToMonth').addEventListener('click', showMonth);
   document.getElementById('prevWeek').addEventListener('click', ()=>showWeek(addDays(currentMonday,-7)));
   document.getElementById('nextWeek').addEventListener('click', ()=>showWeek(addDays(currentMonday,7)));
+  document.getElementById('openWeekCopy').addEventListener('click', openWeekCopyModal);
 
   document.getElementById('screenBody').innerHTML = `
     <nav class="tabs" id="tabs"></nav>
@@ -2619,6 +2757,24 @@ document.getElementById('routineStepsCancel').addEventListener('click', closeRou
 document.getElementById('routineStepsSave').addEventListener('click', saveRoutineStepsModal);
 document.getElementById('routineStepsModalOverlay').addEventListener('click', (e)=>{
   if(e.target.id==='routineStepsModalOverlay') closeRoutineStepsModal();
+});
+document.getElementById('weekCopyPrev').addEventListener('click', ()=>{
+  weekCopyTargetMonday = addDays(weekCopyTargetMonday, -7);
+  renderWeekCopyTarget();
+});
+document.getElementById('weekCopyNext').addEventListener('click', ()=>{
+  weekCopyTargetMonday = addDays(weekCopyTargetMonday, 7);
+  renderWeekCopyTarget();
+});
+document.getElementById('weekCopyCancel').addEventListener('click', closeWeekCopyModal);
+document.getElementById('weekCopyConfirm').addEventListener('click', confirmWeekCopy);
+document.getElementById('weekCopyModalOverlay').addEventListener('click', (e)=>{
+  if(e.target.id==='weekCopyModalOverlay') closeWeekCopyModal();
+});
+document.getElementById('dayCopyCancel').addEventListener('click', closeDayCopyModal);
+document.getElementById('dayCopyConfirm').addEventListener('click', confirmDayCopy);
+document.getElementById('dayCopyModalOverlay').addEventListener('click', (e)=>{
+  if(e.target.id==='dayCopyModalOverlay') closeDayCopyModal();
 });
 
 currentMonday = getMonday(today);
